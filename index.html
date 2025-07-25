@@ -411,7 +411,8 @@
         let tokenizer;
         showLoader(true);
         loadShared().finally(() => {
-            kuromoji.builder({ dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
+            kuromoji.builder({
+                dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
             }).build((err, t) => {
                 if (err) { console.error(err); return; }
                 tokenizer = t;
@@ -424,66 +425,98 @@
         $.v.onkeydown = e => { if (e.key === 'Enter') analyze(); };
 
         /* ========== 6. メイン関数 ========== */
-        function analyze() {
+        async function analyze() {
             const inp = $.v.value.trim();
             if (!inp || !tokenizer) return;
 
+            // --- 1. UIの準備 ---
             setDisabled(true); showLoader(true);
             $.res.innerHTML = $.cand.innerHTML = '';
 
-            setTimeout(async () => {
-                let tok = tokenizer.tokenize(inp).find(t => t.pos === '動詞');
-                const readingKey = kat2hir(inp.replace(/[\u30A1-\u30FA]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)));
+            try {
+                let wordToAnalyze = inp;
+                let candidates = new Set();
 
-                if (!tok) {
-                    const cand = new Set(map[readingKey] || []);
-                    (await translitVerb(readingKey)).forEach(w => {
-                        cand.add(w);
-                        if (!map[readingKey]?.includes(w)) {
-                            (map[readingKey] ??= []).push(w);
-                            saveShared(readingKey, w);
+                // --- 2. 【新ロジック】ひらがな入力の場合、解析前に漢字候補を推測 ---
+                // KANJI定数にマッチしない = ひらがな(・カタカナ)のみ
+                if (!KANJI.test(inp)) {
+                    // 内部辞書と外部APIから候補を生成
+                    const internalCands = new Set(map[inp] || []);
+                    const externalCands = new Set(await translitVerb(inp));
+                    const allCands = new Set([...internalCands, ...externalCands]);
+                    allCands.delete(inp); // 入力そのものは候補から除外
+
+                    if (allCands.size > 0) {
+                        candidates = allCands;
+                        // 漢字候補の中から最初のものを最有力候補とする
+                        const primaryCandidate = [...allCands].find(c => KANJI.test(c));
+                        if (primaryCandidate) {
+                            // 最有力候補を、実際の解析対象とする
+                            wordToAnalyze = primaryCandidate;
                         }
-                    });
-
-                    if (cand.size) showChips(cand);
-                    $.res.innerHTML = '<p class="err">判定できませんでした</p>';
-                    finish(); return;
+                    }
                 }
 
+                // --- 3. 動詞の解析を実行 ---
+                // まず推測した単語（または元の入力）で解析を試みる
+                let tok = tokenizer.tokenize(wordToAnalyze).find(t => t.pos === '動詞');
+
+                // もし推測した単語で解析が失敗した場合、元の入力で再試行する（フォールバック）
+                if (!tok && wordToAnalyze !== inp) {
+                    tok = tokenizer.tokenize(inp).find(t => t.pos === '動詞');
+                }
+
+                // それでも解析できない場合はエラー
+                if (!tok) {
+                    // ただし、候補が見つかっていればそれだけでも表示する
+                    if (candidates.size > 0) showChips(candidates);
+                    throw new Error('判定できませんでした');
+                }
+
+                // --- 4. 解析成功後の処理 ---
                 const dict = tok.basic_form;
                 const reading = kat2hir(tok.reading || dict);
 
+                // 自己学習辞書を更新
                 map[reading] ??= [];
                 if (!map[reading].includes(dict)) {
                     map[reading].push(dict);
                     saveShared(reading, dict);
                 }
 
-                const cand = new Set();
-                (map[reading] || []).filter(w => w !== inp && KANJI.test(w) && isVerb(w)).forEach(w => cand.add(w));
-                if (KANJI.test(dict)) cand.add(dict);
+                // 最終的な候補リストを整理
+                // 解析結果から得られた同音異義語も候補に追加
+                (map[reading] || []).forEach(c => candidates.add(c));
+                // 解析結果の辞書形そのものも（漢字なら）追加
+                if (KANJI.test(dict)) candidates.add(dict);
 
-                if (!cand.size) {
-                    (await translitVerb(reading)).forEach(w => {
-                        cand.add(w);
-                        if (!map[reading].includes(w)) { map[reading].push(w); saveShared(reading, w); }
-                    });
+                // 最終結果に表示される単語や元の入力は候補チップから除外
+                candidates.delete(inp);
+                candidates.delete(dict);
+
+                // 候補チップを表示
+                if (candidates.size > 0) {
+                    showChips(candidates);
                 }
-                if (cand.size) showChips(cand);
 
-                try {
-                    const cls = classify(dict);
-                    const conj = getConj(dict, cls.g);
-                    render(dict, cls, conj);
-                    addHistory(dict);
-                } catch (e) {
-                    $.res.innerHTML = '<p class="err">判定できませんでした</p>';
-                } finally {
-                    finish();
-                }
-            }, 30);
+                // --- 5. 結果の描画 ---
+                const cls = classify(dict);
+                const conj = getConj(dict, cls.g);
 
-            function finish() { showLoader(false); setDisabled(false); $.v.focus(); }
+                // 元の入力がひらがなかどうかで表示モードを切り替える
+                const isHiraganaMode = !KANJI.test(inp);
+                render(dict, cls, conj, isHiraganaMode); // 第4引数にフラグを渡す
+
+
+
+            } catch (e) {
+                // エラーを一元管理
+                $.res.innerHTML = `<p class="err">${e.message || 'エラーが発生しました'}</p>`;
+            } finally {
+                // UIの状態を必ず元に戻す
+                setDisabled(false); showLoader(false);
+                $.v.focus();
+            }
         }
 
         /* ========== 7. UI ヘルパ ========== */
@@ -526,16 +559,36 @@
             const teForm = (df === '行く') ? '行って' : stem + rule.te;
             return { dict: df, nai: stem + rule.w + 'ない', masu: stem + rule.m + 'ます', ba: stem + rule.ba + 'ば', vol: stem + rule.vol + 'う', te: teForm };
         }
-        function render(df, cls, conj) {
-            const labels = { dict: '辞書形', nai: 'ない形', masu: 'ます形', ba: 'ば形', vol: '意向形', te: 'て形' };
-            const rows = Object.entries(conj).map(([k, v]) => `<tr><th>${labels[k]}</th><td>${v}</td></tr>`).join('');
+        function render(df, cls, conj, isHiraganaMode) {
+            const labels = {
+                dict: '辞書形', nai: 'ない形', masu: 'ます形',
+                ba: 'ば形', vol: '意向形', te: 'て形'
+            };
+
+            const displayTitle = isHiraganaMode ? kat2hir(tokenizer.tokenize(df)[0]?.reading || df) : df;
+
+            const rows = Object.entries(conj)
+                .map(([k, v]) => {
+                    let displayValue = v;
+                    if (isHiraganaMode) {
+                        // ▼ ここから修正 ▼
+                        // 活用形を構成する全てのトークンの読みを結合して、完全なひらがな表示にする
+                        const tokens = tokenizer.tokenize(v);
+                        const fullReading = tokens.map(token => token.reading).join('');
+                        displayValue = kat2hir(fullReading || v);
+                        // ▲ ここまで修正 ▲
+                    }
+                    return `<tr><th>${labels[k]}</th><td>${displayValue}</td></tr>`;
+                }).join('');
+
             const badge = ['Ⅰ', 'Ⅱ', 'Ⅲ'][cls.g - 1];
             const icon = { 1: '', 2: '', 3: '' }[cls.g];
+
             $.res.innerHTML = `<div class="card g${cls.g} is-animated">
-                  <div class="badge">${badge}</div>
-                  <p class="title"><span class="icon" aria-label="${cls.type}">${icon}</span> ${df}</p>
-                  <table class="tbl">${rows}</table>
-                </div>`;
+          <div class="badge">${badge}</div>
+          <p class="title"><span class="icon" aria-label="${cls.type}">${icon}</span> ${displayTitle}</p>
+          <table class="tbl">${rows}</table>
+        </div>`;
         }
 
         /* ========== 9. 履歴機能 ========== */
