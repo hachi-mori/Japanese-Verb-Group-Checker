@@ -434,86 +434,71 @@
             $.res.innerHTML = $.cand.innerHTML = '';
 
             try {
-                let wordToAnalyze = inp;
+                // --- 2. まず入力内容を一度解析し、動詞の基本情報を取得 ---
+                const initialTok = tokenizer.tokenize(inp).find(t => t.pos === '動詞');
+                if (!initialTok) {
+                    // この時点で動詞でなければ、候補検索だけ試みて終了
+                    const cands = new Set(await translitVerb(inp));
+                    if (cands.size > 0) showChips(cands);
+                    throw new Error('判定できませんでした');
+                }
+
+                const initialDict = initialTok.basic_form;
+                const isHiraganaInput = !KANJI.test(inp);
+
+                let wordToAnalyze = initialDict; // 解析対象の単語（デフォルトは最初の解析結果）
                 let candidates = new Set();
 
-                // --- 2. 【新ロジック】ひらがな入力の場合、解析前に漢字候補を推測 ---
-                // KANJI定数にマッチしない = ひらがな(・カタカナ)のみ
-                if (!KANJI.test(inp)) {
-                    // 内部辞書と外部APIから候補を生成
+                // --- 3.【新ロジック】ひらがな入力、かつ「する」動詞"以外"の場合のみ、漢字候補を推測 ---
+                const isSuruVerb = (initialDict === 'する' || initialDict.endsWith('する'));
+                if (isHiraganaInput && !isSuruVerb) {
                     const internalCands = new Set(map[inp] || []);
                     const externalCands = new Set(await translitVerb(inp));
-                    const allCands = new Set([...internalCands, ...externalCands]);
-                    allCands.delete(inp); // 入力そのものは候補から除外
+                    candidates = new Set([...internalCands, ...externalCands]);
+                    candidates.delete(inp);
 
-                    if (allCands.size > 0) {
-                        candidates = allCands;
-                        // 漢字候補の中から最初のものを最有力候補とする
-                        const primaryCandidate = [...allCands].find(c => KANJI.test(c));
+                    if (candidates.size > 0) {
+                        const primaryCandidate = [...candidates].find(c => KANJI.test(c));
                         if (primaryCandidate) {
-                            // 最有力候補を、実際の解析対象とする
+                            // 最有力な漢字候補を解析対象に設定
                             wordToAnalyze = primaryCandidate;
                         }
                     }
                 }
 
-                // --- 3. 動詞の解析を実行 ---
-                // まず推測した単語（または元の入力）で解析を試みる
-                let tok = tokenizer.tokenize(wordToAnalyze).find(t => t.pos === '動詞');
+                // --- 4. 最終的な解析を実行 ---
+                const finalTok = tokenizer.tokenize(wordToAnalyze).find(t => t.pos === '動詞');
+                const definitiveTok = finalTok || initialTok; // 推測が失敗したら元の解析結果に戻す
 
-                // もし推測した単語で解析が失敗した場合、元の入力で再試行する（フォールバック）
-                if (!tok && wordToAnalyze !== inp) {
-                    tok = tokenizer.tokenize(inp).find(t => t.pos === '動詞');
-                }
+                const dict = definitiveTok.basic_form;
+                const reading = kat2hir(definitiveTok.reading || dict);
 
-                // それでも解析できない場合はエラー
-                if (!tok) {
-                    // ただし、候補が見つかっていればそれだけでも表示する
-                    if (candidates.size > 0) showChips(candidates);
-                    throw new Error('判定できませんでした');
-                }
-
-                // --- 4. 解析成功後の処理 ---
-                const dict = tok.basic_form;
-                const reading = kat2hir(tok.reading || dict);
-
-                // 自己学習辞書を更新
+                // --- 5. 自己学習と候補チップの最終調整 ---
                 map[reading] ??= [];
                 if (!map[reading].includes(dict)) {
                     map[reading].push(dict);
                     saveShared(reading, dict);
                 }
 
-                // 最終的な候補リストを整理
-                // 解析結果から得られた同音異義語も候補に追加
                 (map[reading] || []).forEach(c => candidates.add(c));
-                // 解析結果の辞書形そのものも（漢字なら）追加
                 if (KANJI.test(dict)) candidates.add(dict);
-
-                // 最終結果に表示される単語や元の入力は候補チップから除外
                 candidates.delete(inp);
                 candidates.delete(dict);
 
-                // 候補チップを表示
                 if (candidates.size > 0) {
                     showChips(candidates);
                 }
 
-                // --- 5. 結果の描画 ---
+                // --- 6. 結果の描画 ---
                 const cls = classify(dict);
                 const conj = getConj(dict, cls.g);
-
-                // 元の入力がひらがなかどうかで表示モードを切り替える
-                const isHiraganaMode = !KANJI.test(inp);
-                render(dict, cls, conj, isHiraganaMode); // 第4引数にフラグを渡す
-
-
+                // ひらがな表示モードの決定は、あくまで「元の入力」に依存
+                render(dict, cls, conj, isHiraganaInput);
+                addHistory(dict);
 
             } catch (e) {
-                // エラーを一元管理
                 $.res.innerHTML = `<p class="err">${e.message || 'エラーが発生しました'}</p>`;
             } finally {
-                // UIの状態を必ず元に戻す
                 setDisabled(false); showLoader(false);
                 $.v.focus();
             }
@@ -585,10 +570,10 @@
             const icon = { 1: '', 2: '', 3: '' }[cls.g];
 
             $.res.innerHTML = `<div class="card g${cls.g} is-animated">
-          <div class="badge">${badge}</div>
-          <p class="title"><span class="icon" aria-label="${cls.type}">${icon}</span> ${displayTitle}</p>
-          <table class="tbl">${rows}</table>
-        </div>`;
+              <div class="badge">${badge}</div>
+              <p class="title"><span class="icon" aria-label="${cls.type}">${icon}</span> ${displayTitle}</p>
+              <table class="tbl">${rows}</table>
+            </div>`;
         }
 
         /* ========== 9. 履歴機能 ========== */
