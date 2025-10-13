@@ -415,11 +415,11 @@
                 dicPath: "./dict/"
             }).build((err, t) => {
                 if (err) {
-+                  console.error(err);
-+                  $.res.innerHTML = '<p class="err">辞書の読み込みに失敗しました（dict/ の配置とパスを確認してください）。</p>';
-+                  showLoader(false);   // 失敗時でもローダーを消す
-+                  return;
-+            }
+                  console.error(err);
+                  $.res.innerHTML = '<p class="err">辞書の読み込みに失敗しました（dict/ の配置とパスを確認してください）。</p>';
+                  showLoader(false);   // 失敗時でもローダーを消す
+                  return;
+            }
                 tokenizer = t;
                 showLoader(false);
             });
@@ -635,4 +635,5 @@
 </body>
 
 </html>
+
 
