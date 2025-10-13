@@ -407,28 +407,18 @@
             clearHist: document.getElementById('clear-history')
         };
 
-/* ========== 4. kuromoji 初期化 ========== */
-  let tokenizer;
-  showLoader(true);
-  loadShared().finally(() => {
-    if (SAFE_MODE) {           // ← 追加：セーフモードなら初期化をスキップ
-      showLoader(false);
-      console.warn('SAFE MODE: kuromoji init skipped');
-      return;
-    }
-    kuromoji.builder({
-      dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/"
-    }).build((err, t) => {
-      if (err) {
-        console.error(err);
-        $.res.innerHTML = '<p class="err">辞書の読み込みに失敗しました。</p>';
-        showLoader(false);     // ← エラーでもローダーを必ず消す
-        return;
-      }
-      tokenizer = t;
-      showLoader(false);
-    });
-  });
+        /* ========== 4. kuromoji 初期化 ========== */
+        let tokenizer;
+        showLoader(true);
+        loadShared().finally(() => {
+            kuromoji.builder({
+                dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/"
+            }).build((err, t) => {
+                if (err) { console.error(err); return; }
+                tokenizer = t;
+                showLoader(false);
+            });
+        });
 
         /* ========== 5. 入力イベント ========== */
         $.btn.onclick = analyze;
@@ -640,4 +630,3 @@
 </body>
 
 </html>
-
