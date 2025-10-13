@@ -68,3 +68,18 @@
 - [ ] 英語、中国語など多言語学習者向けUIの整備
 
 ---
+
+## ライセンス
+
+本アプリでは、以下のオープンソースソフトウェアを利用しています。
+
+- **[kuromoji.js](https://github.com/takuyaa/kuromoji.js)**  
+  Copyright (c) 2014-2017 Takuya Arita  
+  Licensed under the **MIT License**
+
+- **IPADIC Dictionary Data**  
+  Copyright (c) 2000-2003 Nara Institute of Science and Technology  
+  Licensed under the **Revised BSD License**
+
+同梱している `dict/` フォルダ内の辞書データは、kuromoji.js に付属する  
+IPADIC（奈良先端科学技術大学院大学）をもとにしています。
