@@ -412,7 +412,7 @@
         showLoader(true);
         loadShared().finally(() => {
             kuromoji.builder({
-                dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
+                dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/"
             }).build((err, t) => {
                 if (err) { console.error(err); return; }
                 tokenizer = t;
@@ -628,4 +628,5 @@
         document.getElementById('copyright-year').textContent = new Date().getFullYear();
     </script>
 </body>
+
 </html>
