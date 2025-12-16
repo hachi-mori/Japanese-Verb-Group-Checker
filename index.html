@@ -644,7 +644,7 @@
             const lines = Object.entries(latestConj)
                 .map(([k, v]) => {
                     const hira = toHiragana(v);
-                    return `${LABELS[k]},${hira},${v}`;
+                    return `${v},${hira},${LABELS[k]}`;
                 })
                 .join('\r\n');
 
